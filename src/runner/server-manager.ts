@@ -1,6 +1,29 @@
 import type { Subprocess } from 'bun';
+import { createServer } from 'node:net';
 import { BinaryResolver, type ResolvedCommand } from './binary-resolver.ts';
 import { ensureModel } from './model-downloader.ts';
+
+export async function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, '0.0.0.0');
+  });
+}
+
+export async function findAvailablePort(startPort: number = 8088): Promise<number> {
+  let port = startPort;
+  for (let i = 0; i < 50; i++) {
+    if (await isPortAvailable(port)) {
+      return port;
+    }
+    port++;
+  }
+  return startPort;
+}
 
 export class ServerManager {
   private serverProc: Subprocess | null = null;
@@ -42,7 +65,7 @@ export class ServerManager {
     this.llamaDir = options.llamaDir || process.env.LLAMA_DIR || '';
     this.modelPath = options.modelPath || '';
     this.hfModel = options.hfModel || 'bartowski/Spark-X2.6-4B-GGUF:Spark-X2.6-4B-Q4_K_M.gguf';
-    this.port = options.port || 8080;
+    this.port = options.port || 8088; // Default 8088 to avoid busy 8080 in Colab
     // Cap context window to 128k max to prevent Colab GPU crash
     this.contextSize = Math.min(options.contextSize || 131072, 131072);
     this.gpuLayers = options.gpuLayers ?? 99; // Offload all layers to T4 GPU
@@ -74,16 +97,7 @@ export class ServerManager {
   }
 
   async start(timeoutMs: number = 120000): Promise<void> {
-    // Check if an instance is already running
-    if (await this.isHealthy()) {
-      console.log(`\n  ℹ️ Existing llama server detected at ${this.serverUrl}. Reusing running instance.`);
-      if (this.enableTunnel && !this.publicTunnelUrl) {
-        await this.startTunnel();
-      }
-      return;
-    }
-
-    // 1. Ensure model file is downloaded and ready on disk
+    // 1. Check if model file is downloaded and ready on disk
     let hfRepo = 'bartowski/Spark-X2.6-4B-GGUF';
     let hfFile = 'Spark-X2.6-4B-Q4_K_M.gguf';
     if (this.hfModel && this.hfModel.includes(':')) {
@@ -101,12 +115,32 @@ export class ServerManager {
     const resolved = await this.resolver.resolveServer(this.binaryPath);
     console.log(`  ✓ Using server binary: ${resolved.cmdPrefix.join(' ')}`);
 
-    // 3. Attempt spawn (with automatic fallback if optional flags fail)
+    // 3. Find an available free port (so we never fail with "socket already bound")
+    const freePort = await findAvailablePort(this.port);
+    if (freePort !== this.port) {
+      console.log(`  ℹ️ Port ${this.port} is already in use. Switched to available port ${freePort}.`);
+      this.port = freePort;
+      this.serverUrl = `http://127.0.0.1:${this.port}`;
+    }
+
+    // 4. Attempt spawn (with automatic fallback for flag syntax or socket issues)
     try {
       await this.spawnServerProcess(resolved, true, timeoutMs);
     } catch (err: any) {
       const errText = this.errorBuffer.join('\n');
-      if (errText.includes('unknown option') || errText.includes('invalid argument') || errText.includes('-ctk')) {
+      if (errText.includes("couldn't bind HTTP server socket") || errText.includes('port')) {
+        const nextPort = await findAvailablePort(this.port + 1);
+        console.log(`\n  ⚠️ Port ${this.port} busy. Retrying on port ${nextPort}...`);
+        this.port = nextPort;
+        this.serverUrl = `http://127.0.0.1:${this.port}`;
+        await this.spawnServerProcess(resolved, true, timeoutMs);
+      } else if (
+        errText.includes('unknown option') ||
+        errText.includes('invalid argument') ||
+        errText.includes('unknown value for --flash-attn') ||
+        errText.includes('-fa') ||
+        errText.includes('-ctk')
+      ) {
         console.log('\n  ⚠️ Flag compatibility issue detected. Retrying with safe baseline arguments...');
         this.flashAttention = false;
         this.quantizeKv = false;
@@ -116,7 +150,7 @@ export class ServerManager {
       }
     }
 
-    // 4. Start Cloudflare Tunnel if requested
+    // 5. Start Cloudflare Tunnel if requested
     if (this.enableTunnel) {
       await this.startTunnel();
     }
@@ -138,8 +172,13 @@ export class ServerManager {
       '--host', '0.0.0.0',
     ];
 
-    if (useAdvancedFlags && this.flashAttention) args.push('-fa');
-    if (useAdvancedFlags && this.quantizeKv) args.push('-ctk', 'q8_0', '-ctv', 'q8_0');
+    // Newer llama.cpp requires '--flash-attn on' or '-fa on'
+    if (useAdvancedFlags && this.flashAttention) {
+      args.push('--flash-attn', 'on');
+    }
+    if (useAdvancedFlags && this.quantizeKv) {
+      args.push('-ctk', 'q8_0', '-ctv', 'q8_0');
+    }
     if (this.temperature !== undefined) args.push('--temp', this.temperature.toString());
     if (this.topP !== undefined) args.push('--top-p', this.topP.toString());
     if (this.topK !== undefined) args.push('--top-k', this.topK.toString());
@@ -240,6 +279,7 @@ export class ServerManager {
       console.log(`OpenAI API Endpoint:  ${this.publicTunnelUrl}/v1/chat/completions`);
       console.log(`Llama Native API:     ${this.publicTunnelUrl}/completion`);
       console.log(`Health Check:         ${this.publicTunnelUrl}/health`);
+      console.log(`Local Server Port:    ${this.port}`);
       console.log(`Model Context:        ${this.contextSize} tokens (128K capped)`);
       console.log('='.repeat(72));
       console.log('\nCopy the Public Base URL and run benchmarks locally against it:');

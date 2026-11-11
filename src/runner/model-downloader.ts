@@ -29,18 +29,20 @@ export async function ensureModel(
   console.log(`\n  📥 Model not found locally. Downloading ${hfFilename} (~2.6 GB)...`);
   console.log(`  🌐 Source: ${downloadUrl}`);
 
-  // Try huggingface-cli if installed
-  const hfCli = Bun.which('huggingface-cli');
-  if (hfCli) {
-    console.log('  ⚡ Using huggingface-cli for accelerated download...');
-    const proc = Bun.spawn([
-      hfCli, 'download', hfRepo, hfFilename,
-      '--local-dir', '.', '--local-dir-use-symlinks', 'False'
-    ], { stdout: 'inherit', stderr: 'inherit' });
-    await proc.exited;
-    if (existsSync(targetPath)) {
-      return targetPath;
-    }
+  // Try modern hf or huggingface-cli if installed
+  const hf = Bun.which('hf');
+  if (hf) {
+    console.log('  ⚡ Using hf CLI for accelerated download...');
+    try {
+      const proc = Bun.spawn([
+        hf, 'download', hfRepo, hfFilename,
+        '--local-dir', '.', '--local-dir-use-symlinks', 'False'
+      ], { stdout: 'inherit', stderr: 'inherit' });
+      await proc.exited;
+      if (existsSync(targetPath)) {
+        return targetPath;
+      }
+    } catch {}
   }
 
   // Fast direct stream download using fetch

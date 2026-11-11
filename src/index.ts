@@ -83,7 +83,7 @@ function parseArgs(): { config: BenchmarkConfig; serveOnly: boolean } {
   // 2. Initialize with configuration file values
   const config: BenchmarkConfig = {
     mode: 'server',
-    serverUrl: 'http://127.0.0.1:8080',
+    serverUrl: 'http://127.0.0.1:8088',
     serverBinPath: process.env.LLAMA_SERVER_BIN || './llama-server',
     llamaDir: fileCfg.server?.llamaDir || process.env.LLAMA_DIR || '',
     cliPath: process.env.LLAMA_CLI_BIN || './llama-cli',
@@ -93,7 +93,7 @@ function parseArgs(): { config: BenchmarkConfig; serveOnly: boolean } {
     enableTunnel: fileCfg.server?.autoTunnel ?? false,
     serverGpuLayers: fileCfg.server?.gpuLayers ?? 99,
     serverContextSize: Math.min(fileCfg.server?.contextSize ?? 131072, 131072), // 128k cap
-    serverPort: fileCfg.server?.port ?? 8080,
+    serverPort: fileCfg.server?.port ?? 8088,
     flashAttention: fileCfg.server?.flashAttention ?? true,
     quantizeKv: fileCfg.server?.quantizeKv ?? true,
     suites: ALL_SUITES,
