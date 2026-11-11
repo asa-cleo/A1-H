@@ -277,8 +277,8 @@ CRITICAL INSTRUCTIONS:
 Do NOT invent or hallucinate tools that are not in the registry above.`;
 
 function extractToolCall(output: string): { name: string; arguments?: any; reason?: string } | null {
-  // Strip reasoning/thinking tokens (<think>...</think>)
-  let clean = output.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  // Strip reasoning/thinking tokens (<think>...</think> or <ifm|think>...</ifm|think>)
+  let clean = output.replace(/<(?:ifm\|)?think>[\s\S]*?<\/(?:ifm\|)?think>/gi, '').trim();
 
   // Strip markdown code fences if wrapped
   clean = clean.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();

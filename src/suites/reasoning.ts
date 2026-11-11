@@ -1,8 +1,9 @@
 import type { TestCase } from '../types.ts';
 
 function extractNumber(text: string): number | null {
-  // Strip thinking tags if present to prioritize the final answer section
-  const content = text.includes('</think>') ? text.split('</think>').pop()! : text;
+  // Strip thinking tags if present to prioritize the final answer section (<think> or <ifm|think>)
+  const thinkMatch = text.match(/<\/(?:ifm\|)?think>/i);
+  const content = thinkMatch ? text.slice(thinkMatch.index! + thinkMatch[0].length) : text;
 
   // Check for GSM8K format: #### 42
   const gsmMatch = content.match(/####\s*([+-]?\d+(?:\.\d+)?)/);

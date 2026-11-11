@@ -22,7 +22,7 @@ export class LLMClient {
     const temperature = options.temperature ?? this.config.temperature;
     const maxTokens = options.maxTokens ?? this.config.maxTokens;
     const systemPrompt = options.systemPrompt;
-    const stop = options.stop ?? ['<|im_end|>', '<|end_of_text|>', '<|eot_id|>'];
+    const stop = options.stop ?? ['<|im_end|>', '<|end_of_text|>', '<|eot_id|>', '<|ifm|im_end|>'];
 
     if (this.config.mode === 'mock') {
       return this.generateMock(prompt, options);

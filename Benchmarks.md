@@ -164,10 +164,10 @@ Small parameter models (< 5B) struggle with strict negative constraints (avoidin
 
 Use this comparative scorecard to benchmark other compact models (e.g. Qwen 2.5 3B, Gemma 2 2.6B, Llama 3.2 3B, SmolLM2 1.7B) against Spark-X2.6-4B on identical hardware:
 
-| Benchmark Metric | Spark-X2.6-4B (Q4_K_M) | Qwen-2.5-3B-Instruct | Llama-3.2-3B-Instruct | Gemma-2-2.6B-IT |
+| Benchmark Metric | Spark-X2.6-4B (Q4_K_M) | K2-Horizon-3.7B (Q4_K_M) | Qwen-2.5-3B-Instruct | Llama-3.2-3B-Instruct |
 | :--- | :---: | :---: | :---: | :---: |
-| **Model Size / Quant** | 4.0B / Q4_K_M (~2.6 GB) | 3.0B / Q4_K_M (~2.0 GB) | 3.2B / Q4_K_M (~2.1 GB) | 2.6B / Q4_K_M (~1.7 GB) |
-| **Overall Score** | **36 / 58 (62.1%)** | *Pending* | *Pending* | *Pending* |
+| **Model Size / Quant** | 4.0B / Q4_K_M (~2.6 GB) | 3.7B / Q4_K_M (~3.2 GB) | 3.0B / Q4_K_M (~2.0 GB) | 3.2B / Q4_K_M (~2.1 GB) |
+| **Overall Score** | **36 / 58 (62.1%)** | *Ready to run* (`bun run bench:k2`) | *Pending* | *Pending* |
 | **NIAH Recall (4K)** | **100.0% (15/15)** | *Pending* | *Pending* | *Pending* |
 | **Tool Calling (20 tools)** | **100.0% (5/5)** | *Pending* | *Pending* | *Pending* |
 | **Reasoning & Logic** | **62.5% (5/8)** | *Pending* | *Pending* | *Pending* |
