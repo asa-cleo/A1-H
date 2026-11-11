@@ -1,6 +1,6 @@
 import type { Subprocess } from 'bun';
-import { existsSync } from 'node:fs';
 import { BinaryResolver, type ResolvedCommand } from './binary-resolver.ts';
+import { ensureModel } from './model-downloader.ts';
 
 export class ServerManager {
   private serverProc: Subprocess | null = null;
@@ -21,6 +21,7 @@ export class ServerManager {
   private topK: number;
   private enableTunnel: boolean;
   private resolver: BinaryResolver;
+  private errorBuffer: string[] = [];
 
   constructor(options: {
     binaryPath?: string;
@@ -40,7 +41,7 @@ export class ServerManager {
     this.binaryPath = options.binaryPath || './llama-server';
     this.llamaDir = options.llamaDir || process.env.LLAMA_DIR || '';
     this.modelPath = options.modelPath || '';
-    this.hfModel = options.hfModel || '';
+    this.hfModel = options.hfModel || 'bartowski/Spark-X2.6-4B-GGUF:Spark-X2.6-4B-Q4_K_M.gguf';
     this.port = options.port || 8080;
     // Cap context window to 128k max to prevent Colab GPU crash
     this.contextSize = Math.min(options.contextSize || 131072, 131072);
@@ -72,7 +73,7 @@ export class ServerManager {
     }
   }
 
-  async start(timeoutMs: number = 90000): Promise<void> {
+  async start(timeoutMs: number = 120000): Promise<void> {
     // Check if an instance is already running
     if (await this.isHealthy()) {
       console.log(`\n  ℹ️ Existing llama server detected at ${this.serverUrl}. Reusing running instance.`);
@@ -82,42 +83,63 @@ export class ServerManager {
       return;
     }
 
-    // Resolve model source (local file or Hugging Face)
-    const modelArgs: string[] = [];
-    if (this.modelPath && existsSync(this.modelPath)) {
-      modelArgs.push('-m', this.modelPath);
+    // 1. Ensure model file is downloaded and ready on disk
+    let hfRepo = 'bartowski/Spark-X2.6-4B-GGUF';
+    let hfFile = 'Spark-X2.6-4B-Q4_K_M.gguf';
+    if (this.hfModel && this.hfModel.includes(':')) {
+      const parts = this.hfModel.split(':');
+      hfRepo = parts[0];
+      hfFile = parts[1];
     } else if (this.hfModel) {
-      modelArgs.push('-hf', this.hfModel);
-    } else if (this.modelPath) {
-      modelArgs.push('-m', this.modelPath);
-    } else {
-      modelArgs.push('-hf', 'bartowski/Spark-X2.6-4B-GGUF:Spark-X2.6-4B-Q4_K_M.gguf');
+      hfRepo = this.hfModel;
     }
 
-    // Resolve binary (supporting llama-server, llama-serve, llama serve, or LLAMA_DIR)
-    let resolved: ResolvedCommand;
+    const resolvedModelPath = await ensureModel(this.modelPath, hfRepo, hfFile);
+    this.modelPath = resolvedModelPath;
+
+    // 2. Resolve server binary
+    const resolved = await this.resolver.resolveServer(this.binaryPath);
+    console.log(`  ✓ Using server binary: ${resolved.cmdPrefix.join(' ')}`);
+
+    // 3. Attempt spawn (with automatic fallback if optional flags fail)
     try {
-      resolved = this.resolver.resolveServer(this.binaryPath);
+      await this.spawnServerProcess(resolved, true, timeoutMs);
     } catch (err: any) {
-      console.log(`\n  ⚠️ ${err.message}`);
-      console.log('  ⚡ Auto-installing pre-built llama.cpp CUDA binaries...');
-      await this.resolver.autoInstallLlamaPrebuilt('.');
-      resolved = this.resolver.resolveServer();
+      const errText = this.errorBuffer.join('\n');
+      if (errText.includes('unknown option') || errText.includes('invalid argument') || errText.includes('-ctk')) {
+        console.log('\n  ⚠️ Flag compatibility issue detected. Retrying with safe baseline arguments...');
+        this.flashAttention = false;
+        this.quantizeKv = false;
+        await this.spawnServerProcess(resolved, false, timeoutMs);
+      } else {
+        throw err;
+      }
     }
 
-    console.log(`  ✓ Using binary: ${resolved.cmdPrefix.join(' ')}`);
+    // 4. Start Cloudflare Tunnel if requested
+    if (this.enableTunnel) {
+      await this.startTunnel();
+    }
+  }
+
+  private async spawnServerProcess(
+    resolved: ResolvedCommand,
+    useAdvancedFlags: boolean,
+    timeoutMs: number
+  ): Promise<void> {
+    this.errorBuffer = [];
 
     const args = [
       ...resolved.cmdPrefix,
-      ...modelArgs,
+      '-m', this.modelPath,
       '-c', this.contextSize.toString(),
       '-ngl', this.gpuLayers.toString(),
       '--port', this.port.toString(),
       '--host', '0.0.0.0',
     ];
 
-    if (this.flashAttention) args.push('-fa');
-    if (this.quantizeKv) args.push('-ctk', 'q8_0', '-ctv', 'q8_0');
+    if (useAdvancedFlags && this.flashAttention) args.push('-fa');
+    if (useAdvancedFlags && this.quantizeKv) args.push('-ctk', 'q8_0', '-ctv', 'q8_0');
     if (this.temperature !== undefined) args.push('--temp', this.temperature.toString());
     if (this.topP !== undefined) args.push('--top-p', this.topP.toString());
     if (this.topK !== undefined) args.push('--top-k', this.topK.toString());
@@ -137,7 +159,6 @@ export class ServerManager {
       stderr: 'pipe',
     });
 
-    // Cleanup hook on unexpected exit
     const cleanup = () => {
       this.stop();
     };
@@ -145,20 +166,24 @@ export class ServerManager {
     process.on('SIGTERM', cleanup);
     process.on('exit', cleanup);
 
-    // Stream startup logs in background
+    // Stream logs in background & record errors
     this.pipeLogs(this.serverProc);
 
-    // Poll /health until server is ready
     const start = Date.now();
     process.stdout.write('  ⏳ Waiting for model to load into VRAM...');
 
     while (Date.now() - start < timeoutMs) {
       if (await this.isHealthy()) {
         console.log(' Ready! ✅\n');
-        break;
+        return;
       }
 
       if (this.serverProc.exitCode !== null) {
+        const errorDetails = this.errorBuffer.join('\n').trim();
+        console.log(`\n❌ llama server exited with code ${this.serverProc.exitCode}!`);
+        if (errorDetails) {
+          console.log(`\n--- Server Error Output ---\n${errorDetails}\n---------------------------`);
+        }
         throw new Error(`llama server process exited with code ${this.serverProc.exitCode}!`);
       }
 
@@ -166,14 +191,8 @@ export class ServerManager {
       await Bun.sleep(1000);
     }
 
-    if (!await this.isHealthy()) {
-      this.stop();
-      throw new Error(`llama server failed to respond on ${this.serverUrl}/health within ${timeoutMs / 1000}s`);
-    }
-
-    if (this.enableTunnel) {
-      await this.startTunnel();
-    }
+    this.stop();
+    throw new Error(`llama server failed to respond on ${this.serverUrl}/health within ${timeoutMs / 1000}s`);
   }
 
   private async startTunnel(): Promise<void> {
@@ -197,7 +216,7 @@ export class ServerManager {
     const decoder = new TextDecoder();
     let buffer = '';
 
-    while (Date.now() - start < 35000) {
+    while (Date.now() - start < 45000) {
       const { done, value } = await reader.read();
       if (done) break;
 
@@ -214,14 +233,18 @@ export class ServerManager {
     if (!this.publicTunnelUrl) {
       console.log('\n  ⚠️ Cloudflare tunnel startup timed out, continuing on localhost.');
     } else {
-      console.log('='.repeat(70));
-      console.log('🎉 PUBLIC CLOUDFLARE ENDPOINTS:');
-      console.log('='.repeat(70));
-      console.log(`Base URL:             ${this.publicTunnelUrl}`);
+      console.log('='.repeat(72));
+      console.log('🎉 CLOUDFLARE PUBLIC TUNNEL IS READY!');
+      console.log('='.repeat(72));
+      console.log(`Public Base URL:      ${this.publicTunnelUrl}`);
       console.log(`OpenAI API Endpoint:  ${this.publicTunnelUrl}/v1/chat/completions`);
       console.log(`Llama Native API:     ${this.publicTunnelUrl}/completion`);
       console.log(`Health Check:         ${this.publicTunnelUrl}/health`);
-      console.log('='.repeat(70) + '\n');
+      console.log(`Model Context:        ${this.contextSize} tokens (128K capped)`);
+      console.log('='.repeat(72));
+      console.log('\nCopy the Public Base URL and run benchmarks locally against it:');
+      console.log(`bun run bench --mode server --server-url ${this.publicTunnelUrl} --suite all\n`);
+      console.log('='.repeat(72) + '\n');
     }
   }
 
@@ -241,12 +264,19 @@ export class ServerManager {
 
         for (const line of lines) {
           const clean = line.trim();
+          if (!clean) continue;
+          this.errorBuffer.push(clean);
+          if (this.errorBuffer.length > 50) this.errorBuffer.shift();
+
+          // Show key informative lines live
           if (
             clean.includes('load_tensors') ||
             clean.includes('offloaded') ||
             clean.includes('kv_cache') ||
             clean.includes('listening on') ||
-            clean.includes('CUDA')
+            clean.includes('CUDA') ||
+            clean.includes('error') ||
+            clean.includes('failed')
           ) {
             console.log(`    [llama] ${clean}`);
           }

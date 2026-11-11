@@ -14,7 +14,7 @@ export class BinaryResolver {
     this.customLlamaDir = (customLlamaDir || process.env.LLAMA_DIR || '').trim();
   }
 
-  resolveServer(specifiedBin?: string): ResolvedCommand {
+  async resolveServer(specifiedBin?: string): Promise<ResolvedCommand> {
     // 1. If explicit binary specified and exists
     if (specifiedBin && specifiedBin !== './llama-server' && existsSync(specifiedBin)) {
       const fullPath = resolve(specifiedBin);
@@ -27,7 +27,7 @@ export class BinaryResolver {
 
     const searchDirs = this.getSearchDirs();
 
-    // 2. Search candidate executables in search directories
+    // 2. Check for llama-server executable in search directories
     for (const d of searchDirs) {
       if (!existsSync(d)) continue;
       for (const name of ['llama-server', 'llama-serve']) {
@@ -55,15 +55,34 @@ export class BinaryResolver {
       }
     }
 
-    // 4. Check if 'llama' CLI tool is in PATH (e.g., installed via URL/brew/apt with 'llama serve')
+    // 4. Check if a 'llama' binary exists in PATH, but verify if it actually supports 'serve'
     const llamaCli = Bun.which('llama');
     if (llamaCli) {
       const pDir = dirname(llamaCli);
-      return {
-        cmdPrefix: [llamaCli, 'serve'],
-        workDir: pDir,
-        libDir: pDir,
-      };
+      // First check if llama-server exists right next to it!
+      const siblingServer = join(pDir, 'llama-server');
+      if (this.isExecutable(siblingServer)) {
+        return {
+          cmdPrefix: [siblingServer],
+          workDir: pDir,
+          libDir: pDir,
+        };
+      }
+
+      // Check if 'llama serve --help' works without error
+      try {
+        const testProc = Bun.spawnSync([llamaCli, 'serve', '--help'], {
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        if (testProc.exitCode === 0) {
+          return {
+            cmdPrefix: [llamaCli, 'serve'],
+            workDir: pDir,
+            libDir: pDir,
+          };
+        }
+      } catch {}
     }
 
     // 5. Fallback: Check if ./llama-server exists in current directory
@@ -76,9 +95,21 @@ export class BinaryResolver {
       };
     }
 
+    // 6. If no working server binary exists, automatically download the latest prebuilt CUDA binary!
+    console.log('\n  ℹ️ No working llama-server binary detected.');
+    await this.autoInstallLlamaPrebuilt('.');
+
+    if (this.isExecutable(local)) {
+      return {
+        cmdPrefix: [local],
+        workDir: process.cwd(),
+        libDir: process.cwd(),
+      };
+    }
+
     throw new Error(
       `llama-server not found! Checked $LLAMA_DIR ("${this.customLlamaDir}"), system PATH, and local paths.\n` +
-      `Either install llama.cpp, export LLAMA_DIR=/path/to/binaries, or run with --auto-install-llama`
+      `Install llama.cpp or set export LLAMA_DIR=/path/to/binaries`
     );
   }
 
@@ -119,6 +150,14 @@ export class BinaryResolver {
     const llama = Bun.which('llama');
     if (llama) {
       const pDir = dirname(llama);
+      const siblingCli = join(pDir, 'llama-cli');
+      if (this.isExecutable(siblingCli)) {
+        return {
+          cmdPrefix: [siblingCli],
+          workDir: pDir,
+          libDir: pDir,
+        };
+      }
       return {
         cmdPrefix: [llama, 'cli'],
         workDir: pDir,
@@ -135,9 +174,7 @@ export class BinaryResolver {
       };
     }
 
-    throw new Error(
-      `llama-cli not found! Checked $LLAMA_DIR, system PATH, and local directory.`
-    );
+    throw new Error(`llama-cli not found! Checked $LLAMA_DIR, system PATH, and local directory.`);
   }
 
   async ensureCloudflared(): Promise<string> {
@@ -195,9 +232,12 @@ export class BinaryResolver {
     if (this.customLlamaDir) {
       dirs.push(resolve(this.customLlamaDir));
     }
+    const home = process.env.HOME || '/root';
     dirs.push(
       process.cwd(),
       join(process.cwd(), 'bin'),
+      join(home, '.local/bin'),
+      '/root/.local/bin',
       '/content',
       '/content/llama-server',
       '/content/llama.cpp',
