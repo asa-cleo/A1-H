@@ -1,0 +1,27 @@
+{
+  "name": "llm-benchmark-suite",
+  "version": "1.0.0",
+  "description": "High-performance TypeScript & Bun benchmark suite and Colab server host for small LLMs (0.9B - 4B) with NIAH, Reasoning, Hard Tasks, Hallucination Reduction, Injection Loyalty, Creativity, and 20-Tool Function Calling",
+  "type": "module",
+  "scripts": {
+    "bench": "bun run src/index.ts",
+    "bench:all": "bun run src/index.ts --suite all",
+    "bench:colab": "bun run src/index.ts --mode server --auto-server --suite all",
+    "serve": "bun run src/index.ts --serve-only",
+    "serve:tunnel": "bun run src/index.ts --serve-only --tunnel",
+    "bench:niah": "bun run src/index.ts --suite niah",
+    "bench:reasoning": "bun run src/index.ts --suite reasoning",
+    "bench:hard": "bun run src/index.ts --suite hard",
+    "bench:hallucination": "bun run src/index.ts --suite hallucination",
+    "bench:injection": "bun run src/index.ts --suite injection",
+    "bench:creativity": "bun run src/index.ts --suite creativity",
+    "bench:tools": "bun run src/index.ts --suite tools",
+    "test:mock": "bun run src/index.ts --mode mock --suite all",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "bun-types": "^1.4.4",
+    "typescript": "^7.0.2"
+  }
+}

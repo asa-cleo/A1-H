@@ -1,0 +1,26 @@
+{
+  "model": {
+    "hf": "bartowski/Spark-X2.6-4B-GGUF:Spark-X2.6-4B-Q4_K_M.gguf",
+    "localPath": "./Spark-X2.6-4B-Q4_K_M.gguf"
+  },
+  "server": {
+    "contextSize": 131072,
+    "gpuLayers": 99,
+    "flashAttention": true,
+    "quantizeKv": true,
+    "port": 8080,
+    "host": "0.0.0.0",
+    "temperature": 1.0,
+    "topP": 0.95,
+    "topK": 0,
+    "autoTunnel": true,
+    "llamaDir": ""
+  },
+  "benchmark": {
+    "suites": ["all"],
+    "timeoutMs": 60000,
+    "maxTokens": 512,
+    "noStream": false,
+    "outputDir": "./results"
+  }
+}
