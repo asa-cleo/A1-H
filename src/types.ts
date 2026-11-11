@@ -100,6 +100,9 @@ export interface BenchmarkConfig {
   serverPort: number;
   flashAttention: boolean; // -fa
   quantizeKv: boolean;     // -ctk q8_0 -ctv q8_0
+  jinja: boolean;          // --jinja for ChatML template parsing
+  thinking: 'none' | 'low' | 'high'; // Controllable thinking budget
+  enableThinking: boolean; // Toggle thinking on/off
   suites: BenchmarkSuiteName[];
   temperature: number;
   topP: number;

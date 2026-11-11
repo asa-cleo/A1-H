@@ -39,6 +39,9 @@ export class ServerManager {
   private port: number;
   private flashAttention: boolean;
   private quantizeKv: boolean;
+  private jinja: boolean;
+  private thinking: 'none' | 'low' | 'high';
+  private enableThinking: boolean;
   private temperature: number;
   private topP: number;
   private topK: number;
@@ -56,6 +59,9 @@ export class ServerManager {
     gpuLayers?: number;
     flashAttention?: boolean;
     quantizeKv?: boolean;
+    jinja?: boolean;
+    thinking?: 'none' | 'low' | 'high';
+    enableThinking?: boolean;
     temperature?: number;
     topP?: number;
     topK?: number;
@@ -71,9 +77,12 @@ export class ServerManager {
     this.gpuLayers = options.gpuLayers ?? 99; // Offload all layers to T4 GPU
     this.flashAttention = options.flashAttention ?? true;
     this.quantizeKv = options.quantizeKv ?? true;
+    this.jinja = options.jinja ?? true;
+    this.thinking = options.thinking ?? 'high';
+    this.enableThinking = options.enableThinking ?? true;
     this.temperature = options.temperature ?? 1.0;
     this.topP = options.topP ?? 0.95;
-    this.topK = options.topK ?? 0;
+    this.topK = options.topK ?? -1;
     this.enableTunnel = options.enableTunnel ?? false;
     this.serverUrl = `http://127.0.0.1:${this.port}`;
     this.resolver = new BinaryResolver(this.llamaDir);
@@ -139,11 +148,17 @@ export class ServerManager {
         errText.includes('invalid argument') ||
         errText.includes('unknown value for --flash-attn') ||
         errText.includes('-fa') ||
-        errText.includes('-ctk')
+        errText.includes('-ctk') ||
+        errText.includes('--jinja') ||
+        errText.includes('--top-k')
       ) {
         console.log('\n  ⚠️ Flag compatibility issue detected. Retrying with safe baseline arguments...');
         this.flashAttention = false;
         this.quantizeKv = false;
+        this.jinja = false;
+        if (errText.includes('--top-k') || errText.includes('top_k')) {
+          this.topK = 0; // Fallback from -1 to 0 if llama-server CLI parser rejects -1
+        }
         await this.spawnServerProcess(resolved, false, timeoutMs);
       } else {
         throw err;
@@ -178,6 +193,9 @@ export class ServerManager {
     }
     if (useAdvancedFlags && this.quantizeKv) {
       args.push('-ctk', 'q8_0', '-ctv', 'q8_0');
+    }
+    if (useAdvancedFlags && this.jinja) {
+      args.push('--jinja');
     }
     if (this.temperature !== undefined) args.push('--temp', this.temperature.toString());
     if (this.topP !== undefined) args.push('--top-p', this.topP.toString());
@@ -281,6 +299,8 @@ export class ServerManager {
       console.log(`Health Check:         ${this.publicTunnelUrl}/health`);
       console.log(`Local Server Port:    ${this.port}`);
       console.log(`Model Context:        ${this.contextSize} tokens (128K capped)`);
+      console.log(`Thinking Mode:        ${this.thinking.toUpperCase()} (enable_thinking: ${this.enableThinking})`);
+      console.log(`Sampling Settings:    temp=${this.temperature}, top_p=${this.topP}, top_k=${this.topK}`);
       console.log('='.repeat(72));
       console.log('\nCopy the Public Base URL and run benchmarks locally against it:');
       console.log(`bun run bench --mode server --server-url ${this.publicTunnelUrl} --suite all\n`);

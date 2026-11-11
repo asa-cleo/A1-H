@@ -1,22 +1,31 @@
 import type { TestCase } from '../types.ts';
 
 function extractNumber(text: string): number | null {
+  // Strip thinking tags if present to prioritize the final answer section
+  const content = text.includes('</think>') ? text.split('</think>').pop()! : text;
+
   // Check for GSM8K format: #### 42
-  const gsmMatch = text.match(/####\s*([+-]?\d+(?:\.\d+)?)/);
+  const gsmMatch = content.match(/####\s*([+-]?\d+(?:\.\d+)?)/);
   if (gsmMatch) return parseFloat(gsmMatch[1]);
 
   // Check for "answer is: 42" or "answer is 42" or "= 42"
-  const answerMatch = text.match(/(?:answer|total|result)\s*(?:is|:|=)?\s*([+-]?\d+(?:\.\d+)?)/i);
+  const answerMatch = content.match(/(?:answer|total|result)\s*(?:is|:|=)?\s*([+-]?\d+(?:\.\d+)?)/i);
   if (answerMatch) return parseFloat(answerMatch[1]);
 
   // Check for boxed answers \boxed{42}
-  const boxedMatch = text.match(/\\boxed\{([+-]?\d+(?:\.\d+)?)\}/);
+  const boxedMatch = content.match(/\\boxed\{([+-]?\d+(?:\.\d+)?)\}/);
   if (boxedMatch) return parseFloat(boxedMatch[1]);
 
-  // Fallback to the last standalone number in the text
-  const numbers = text.match(/-?\b\d+(?:\.\d+)?\b/g);
+  // Fallback to the last standalone number in the final answer
+  const numbers = content.match(/-?\b\d+(?:\.\d+)?\b/g);
   if (numbers && numbers.length > 0) {
     return parseFloat(numbers[numbers.length - 1]);
+  }
+
+  // Final fallback to entire text if content section had no number
+  const allNumbers = text.match(/-?\b\d+(?:\.\d+)?\b/g);
+  if (allNumbers && allNumbers.length > 0) {
+    return parseFloat(allNumbers[allNumbers.length - 1]);
   }
   return null;
 }

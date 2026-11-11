@@ -49,13 +49,24 @@ export class LLMClient {
     // User can still force atomic POST via --no-stream
     const shouldStream = !this.config.noStream;
 
-    const requestBody = {
-      prompt: options.systemPrompt ? `<|system|>\n${options.systemPrompt}\n<|user|>\n${prompt}\n<|assistant|>\n` : prompt,
+    // Build ChatML format for Spark-X2.6
+    const promptPayload = options.systemPrompt
+      ? `<|im_start|>system\n${options.systemPrompt}<|im_end|>\n<|im_start|>user\n${prompt}<|im_end|>\n<|im_start|>assistant\n`
+      : (prompt.includes('<|im_start|>') ? prompt : `<|im_start|>user\n${prompt}<|im_end|>\n<|im_start|>assistant\n`);
+
+    const requestBody: Record<string, any> = {
+      prompt: promptPayload,
       temperature: options.temperature,
+      top_p: this.config.topP,
+      top_k: this.config.topK,
       n_predict: options.maxTokens,
       stop: options.stop,
       stream: shouldStream,
       cache_prompt: false,
+      chat_template_kwargs: {
+        enable_thinking: this.config.enableThinking ?? true,
+        reasoning_effort: this.config.thinking ?? 'high',
+      },
     };
 
     const controller = new AbortController();

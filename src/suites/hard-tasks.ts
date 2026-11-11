@@ -9,8 +9,10 @@ export function createHardTasksTestCases(): TestCase[] {
       prompt: `Write exactly 3 coherent sentences describing the ocean without using the letter 'e' (neither lowercase 'e' nor uppercase 'E') anywhere in your entire response.
 Do not include any conversational filler, only the 3 sentences.`,
       evaluator: (output: string) => {
+        // Strip thinking/reasoning tags
+        const withoutThink = output.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
         // Strip markdown fences or tags if any
-        const clean = output.replace(/```[a-z]*|```/g, '').trim();
+        const clean = withoutThink.replace(/```[a-z]*|```/g, '').trim();
         const sentences = clean.split(/[.!?]+/).filter(s => s.trim().length > 3);
         const hasE = /[eE]/.test(clean);
 
@@ -48,12 +50,9 @@ Customer Review:
 "I bought the TurboGlide Blender Pro two weeks ago. Honestly, the motor started smoking on the second day of making a banana smoothie! It is loud as a jet engine and the lid is nearly impossible to twist open. Total waste of $120. I give it 1 star."`,
       expectedAnswer: 'Valid JSON matching schema',
       evaluator: (output: string) => {
-        let clean = output.trim();
+        let clean = output.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
         // Remove markdown fences if model mistakenly wrapped it
-        if (clean.startsWith('```json')) clean = clean.slice(7);
-        if (clean.startsWith('```')) clean = clean.slice(3);
-        if (clean.endsWith('```')) clean = clean.slice(0, -3);
-        clean = clean.trim();
+        clean = clean.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
 
         try {
           const parsed = JSON.parse(clean);

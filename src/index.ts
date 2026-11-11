@@ -46,7 +46,10 @@ Options:
   --depths <n,n,...>           Needle insertion depths for NIAH (Default: 0,0.25,0.5,0.75,1.0)
   --temp <float>               Sampling temperature (Default: 1.0)
   --top-p <float>              Top-p sampling (Default: 0.95)
-  --top-k <int>                Top-k sampling (Default: 0)
+  --top-k <int>                Top-k sampling (Default: -1, 0 or -1 disables)
+  --thinking <none|low|high>   Spark-X2.6 thinking budget (Default: high)
+  --no-thinking                Disable thinking mode
+  --jinja / --no-jinja         Toggle Jinja template parsing (Default: enabled)
   --max-tokens <int>           Max tokens to generate per prompt (Default: 512)
   --no-stream                  Force atomic POST instead of SSE streaming
   --timeout <ms>               Timeout per test in milliseconds (Default: 60000)
@@ -96,10 +99,13 @@ function parseArgs(): { config: BenchmarkConfig; serveOnly: boolean } {
     serverPort: fileCfg.server?.port ?? 8088,
     flashAttention: fileCfg.server?.flashAttention ?? true,
     quantizeKv: fileCfg.server?.quantizeKv ?? true,
+    jinja: fileCfg.server?.jinja ?? true,
+    thinking: fileCfg.server?.thinking ?? 'high',
+    enableThinking: fileCfg.server?.enableThinking ?? true,
     suites: ALL_SUITES,
     temperature: fileCfg.server?.temperature ?? 1.0,
     topP: fileCfg.server?.topP ?? 0.95,
-    topK: fileCfg.server?.topK ?? 0,
+    topK: fileCfg.server?.topK ?? -1,
     maxTokens: fileCfg.benchmark?.maxTokens ?? 512,
     timeoutMs: fileCfg.benchmark?.timeoutMs ?? 60000,
     niahContextLengths: [1024, 2048, 4096],
@@ -165,6 +171,16 @@ function parseArgs(): { config: BenchmarkConfig; serveOnly: boolean } {
       config.topP = parseFloat(args[++i]);
     } else if (arg === '--top-k' && args[i + 1]) {
       config.topK = parseInt(args[++i], 10);
+    } else if (arg === '--thinking' && args[i + 1]) {
+      config.thinking = args[++i].toLowerCase() as any;
+      config.enableThinking = config.thinking !== 'none';
+    } else if (arg === '--no-thinking') {
+      config.thinking = 'none';
+      config.enableThinking = false;
+    } else if (arg === '--jinja') {
+      config.jinja = true;
+    } else if (arg === '--no-jinja') {
+      config.jinja = false;
     } else if (arg === '--max-tokens' && args[i + 1]) {
       config.maxTokens = parseInt(args[++i], 10);
     } else if (arg === '--timeout' && args[i + 1]) {
@@ -202,6 +218,9 @@ async function main() {
       gpuLayers: config.serverGpuLayers,
       flashAttention: config.flashAttention,
       quantizeKv: config.quantizeKv,
+      jinja: config.jinja,
+      thinking: config.thinking,
+      enableThinking: config.enableThinking,
       temperature: config.temperature,
       topP: config.topP,
       topK: config.topK,

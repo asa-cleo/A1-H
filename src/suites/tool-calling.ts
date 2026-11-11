@@ -277,11 +277,11 @@ CRITICAL INSTRUCTIONS:
 Do NOT invent or hallucinate tools that are not in the registry above.`;
 
 function extractToolCall(output: string): { name: string; arguments?: any; reason?: string } | null {
-  let clean = output.trim();
-  if (clean.startsWith('```json')) clean = clean.slice(7);
-  if (clean.startsWith('```')) clean = clean.slice(3);
-  if (clean.endsWith('```')) clean = clean.slice(0, -3);
-  clean = clean.trim();
+  // Strip reasoning/thinking tokens (<think>...</think>)
+  let clean = output.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  // Strip markdown code fences if wrapped
+  clean = clean.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
 
   try {
     const parsed = JSON.parse(clean);
@@ -295,6 +295,14 @@ function extractToolCall(output: string): { name: string; arguments?: any; reaso
       };
     }
   } catch {
+    // Search for any embedded JSON object { "name": ... }
+    const matchJson = clean.match(/\{[\s\S]*?"name"\s*:\s*"([a-zA-Z0-9_]+)"[\s\S]*?\}/);
+    if (matchJson) {
+      try {
+        const parsed = JSON.parse(matchJson[0]);
+        if (parsed.name) return parsed;
+      } catch {}
+    }
     // regex search for "name": "..."
     const match = clean.match(/"name"\s*:\s*"([a-zA-Z0-9_]+)"/);
     if (match) {
